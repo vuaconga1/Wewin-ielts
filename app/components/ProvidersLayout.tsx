@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import Navbar from "./layouts/header";
 import Sidebar from "./layouts/sidebar";
 import Footer from "./layouts/footer";
-import { allowedEmails } from "../constants/email";
+import { isAdminSession } from "../lib/auth";
 
 export default function ProvidersLayout({
   children,
@@ -12,7 +12,7 @@ export default function ProvidersLayout({
   children: React.ReactNode;
 }) {
   const { data: session } = useSession();
-  const isAdmin = allowedEmails.includes(session?.user?.email || "");
+  const isAdmin = isAdminSession(session);
 
   return (
     <>

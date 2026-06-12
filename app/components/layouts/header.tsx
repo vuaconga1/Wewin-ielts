@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Routes } from "@/app/constants/routes";
 import Dropdown from "../dropdown";
 import Section from "../section";
-import { allowedEmails } from "@/app/constants/email";
+import { isAdminSession } from "@/app/lib/auth";
 import { BookOpen, FolderOpen } from "lucide-react";
 import NavButton from "../navButton";
 import { handleLogout } from "@/app/api/auth/[...nextauth]/route";
@@ -19,7 +19,7 @@ export default function Navbar() {
   const [showNavbar, setShowNavbar] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
 
-  const isAdmin = allowedEmails.includes(session?.user?.email || "");
+  const isAdmin = isAdminSession(session);
 
   // 🔹 Hiệu ứng ẩn/hiện khi cuộn
   useEffect(() => {
@@ -178,7 +178,7 @@ function UserSection({ session, setMenuOpen }: any) {
       <motion.button
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
-        onClick={() => signIn("google")}
+        onClick={() => signIn()}
         className="
         hidden lg:flex         
         items-center gap-2 
@@ -342,11 +342,11 @@ function MobileMenu({ menuOpen, setMenuOpen, session, isAdmin }: any) {
               <button
                 onClick={() => {
                   setMenuOpen(false);
-                  signIn("google");
+                  signIn();
                 }}
                 className="w-full bg-white text-[#0E4BA9] py-3 rounded-xl font-bold shadow-lg"
               >
-                🔐 Đăng nhập Google
+                🔐 Đăng nhập
               </button>
             ) : (
               <div className="space-y-3">

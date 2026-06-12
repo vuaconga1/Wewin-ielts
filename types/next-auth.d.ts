@@ -8,6 +8,7 @@ declare module "next-auth" {
     error?: string;
     user?: {
       id?: string;
+      role?: "admin" | "user";
     } & DefaultSession["user"];
   }
 }
@@ -19,5 +20,7 @@ declare module "next-auth/jwt" {
     expiresAt?: number;
     error?: string;
     userId?: string;
+    role?: "admin" | "user";
+    provider?: "google" | "credentials";
   }
 }
