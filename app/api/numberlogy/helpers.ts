@@ -1,9 +1,5 @@
 // /app/api/numberlogy/helpers.ts
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+import { getOpenAI } from "@/app/lib/openai";
 
 /* ============================================= */
 /* GRADING LOGIC */
@@ -128,6 +124,14 @@ Trả về CHỈ HTML.
 `;
 
   try {
+    const openai = getOpenAI();
+    if (!openai) {
+      return `
+<div style="background:#fffbeb;padding:14px;border-radius:10px;border:1px solid #fde68a;color:#92400e;">
+  Chưa cấu hình OPENAI_API_KEY — bỏ qua phân tích thần số học.
+</div>`;
+    }
+
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],

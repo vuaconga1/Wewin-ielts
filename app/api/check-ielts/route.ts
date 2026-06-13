@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     const sheetName = "Listening_list";
 
     // Fetch toàn bộ cột Email
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/'${sheetName}'!G:G?majorDimension=COLUMNS`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/'${sheetName}'!H:H?majorDimension=COLUMNS`;
 
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },

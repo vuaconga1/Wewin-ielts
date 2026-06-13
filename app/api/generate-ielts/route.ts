@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+import { getOpenAI, requireOpenAI } from "@/app/lib/openai";
+import { getFallbackSpeakingQuestions } from "@/app/constants/speaking";
 
 export async function GET() {
   try {
+    const openai = getOpenAI();
+    if (!openai) {
+      return NextResponse.json(getFallbackSpeakingQuestions());
+    }
+
     const prompt = `
 Generate a random IELTS Speaking test set (Level B1-B2).
 Output strictly in valid JSON format only:
@@ -35,7 +37,7 @@ Output strictly in valid JSON format only:
     return NextResponse.json(data);
   } catch (error: any) {
     console.error("❌ Error generating IELTS set:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(getFallbackSpeakingQuestions());
   }
 }
 
@@ -58,6 +60,7 @@ interface WritingEvaluation {
 export async function evaluateWriting(
   essay: string
 ): Promise<WritingEvaluation> {
+  const openai = requireOpenAI();
   const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
@@ -284,6 +287,7 @@ HTML phải có format:
 Không thêm text ngoài HTML.
 `;
 
+  const openai = requireOpenAI();
   const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [{ role: "user", content: prompt }],
@@ -297,6 +301,7 @@ Không thêm text ngoài HTML.
 // Whisper → transcript
 // ============================================
 export async function transcribeAudio(file: File) {
+  const openai = requireOpenAI();
   return await openai.audio.transcriptions.create({
     file,
     model: "whisper-1",
@@ -307,6 +312,7 @@ export async function transcribeAudio(file: File) {
 // GPT chấm Speaking - FIXED VERSION (bilingual per line pair)
 // ============================================
 export async function evaluateSpeaking(transcript: string) {
+  const openai = requireOpenAI();
   const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [

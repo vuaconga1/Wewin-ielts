@@ -11,12 +11,20 @@ import { sendEmailWithPDF } from "@/app/components/sendMail";
 import { buildIELTSEmailHTML } from "@/app/components/emailIELTS";
 import { analyzeNumerologyHTML } from "../numberlogy/helpers";
 import { adminEmails } from "@/app/constants/email";
+import { getSpeakingReportFolderId } from "@/app/lib/googleDriveConfig";
+import { SHEET_TABS } from "@/app/lib/googleSheetsConfig";
 
 export const runtime = "nodejs";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-export const FINAL_SHEET_NAME = "Final_list";
-const DRIVE_FOLDER_ID = "1DVnoOgCCqYv1lIT_1I10p9GPXNFYENS4";
+export const FINAL_SHEET_NAME = SHEET_TABS.FINAL;
+
+const FALLBACK_ANALYSIS = `Speaking assessment is pending. Audio recordings have been saved. A valid OPENAI_API_KEY is required for AI transcription and grading.
+
+Bài đánh giá Speaking đang chờ xử lý. File ghi âm đã được lưu. Cần OPENAI_API_KEY hợp lệ để phiên âm và chấm tự động.`;
+
+const NO_TRANSCRIPT =
+  "(Audio recorded — transcription unavailable without a valid OPENAI_API_KEY)";
 
 /* ----------------------------------------------------- */
 interface SpeakingReportRequest {
@@ -73,7 +81,9 @@ async function transcribeWithWhisper({
 }: {
   buffer: Uint8Array;
   contentType: string;
-}): Promise<string> {
+}): Promise<string | null> {
+  if (!OPENAI_API_KEY) return null;
+
   const pure = toPureArrayBuffer(buffer);
   const blob = new Blob([pure], { type: contentType });
   const form = new FormData();
@@ -86,7 +96,10 @@ async function transcribeWithWhisper({
     body: form,
   });
 
-  if (!res.ok) throw new Error(`Whisper error ${res.status}`);
+  if (!res.ok) {
+    console.warn(`Whisper error ${res.status}`);
+    return null;
+  }
   return (await res.json()).text || "";
 }
 
@@ -103,6 +116,10 @@ async function analyzeWithGPT({
   transcript: string;
   questionsText: string;
 }): Promise<string> {
+  if (!OPENAI_API_KEY || !transcript.trim()) {
+    return FALLBACK_ANALYSIS;
+  }
+
   const prompt = `
 Bạn là giám khảo IELTS Speaking của IDP, chuyên phân tích và đánh giá bài nói học viên.
 
@@ -148,7 +165,10 @@ Bắt đầu phản hồi:
     }),
   });
 
-  if (!res.ok) throw new Error(`GPT error ${res.status}`);
+  if (!res.ok) {
+    console.warn(`GPT error ${res.status}`);
+    return FALLBACK_ANALYSIS;
+  }
   const raw = (await res.json()).choices[0].message.content || "";
 
   // Làm sạch Markdown nếu GPT lỡ dùng
@@ -793,22 +813,39 @@ export async function POST(req: Request) {
     const finalEmail = student.email; // override email học viên bằng email đăng nhập
     const { report } = body;
 
+    const warnings: string[] = [];
+
     /* TRANSCRIBE */
     const transcripts: Record<string, string> = {};
     for (const { part, link } of audios) {
+      const key = `part${part}` as PartKey;
       const id = extractFileId(link);
-      if (!id) continue;
-      const audio = await downloadAudioFromDrive(accessToken, id);
-      transcripts[`part${part}` as PartKey] =
-        (await transcribeWithWhisper(audio)) || "";
+      if (!id) {
+        transcripts[key] = "(No audio link)";
+        continue;
+      }
+      try {
+        const audio = await downloadAudioFromDrive(accessToken, id);
+        const text = await transcribeWithWhisper(audio);
+        transcripts[key] = text || NO_TRANSCRIPT;
+        if (!text) {
+          warnings.push(
+            `Part ${part}: không phiên âm được (kiểm tra OPENAI_API_KEY).`
+          );
+        }
+      } catch (err: any) {
+        console.warn(`Failed to process part ${part}:`, err);
+        transcripts[key] = "(Audio recorded — could not download or transcribe)";
+        warnings.push(`Part ${part}: ${err.message || "xử lý audio thất bại"}.`);
+      }
+    }
+
+    for (const p of [1, 2, 3] as const) {
+      const key: PartKey = `part${p}`;
+      transcripts[key] = transcripts[key] || "(No answer)";
     }
 
     const fullTranscript = Object.values(transcripts).join("\n\n");
-    if (!fullTranscript.trim()) {
-      transcripts["part1"] = transcripts["part1"] || "(No answer)";
-      transcripts["part2"] = transcripts["part2"] || "(No answer)";
-      transcripts["part3"] = transcripts["part3"] || "(No answer)";
-    }
 
     /* GPT FEEDBACK */
     const analysis = await analyzeWithGPT({
@@ -848,7 +885,7 @@ export async function POST(req: Request) {
     const fileName = `IELTS_Speaking_Report_${student.name}.pdf`;
     const pdfLink = await uploadPdfToDrive(
       accessToken,
-      DRIVE_FOLDER_ID,
+      getSpeakingReportFolderId(),
       fileName,
       pdfBytes
     );
@@ -901,7 +938,11 @@ export async function POST(req: Request) {
     //   pdfName: `IELTS_Speaking_Report_${student.name}.pdf`, // ⭐ Tên file PDF
     // });
 
-    return NextResponse.json({ success: true, pdfLink });
+    return NextResponse.json({
+      success: true,
+      pdfLink,
+      warnings: warnings.length ? warnings : undefined,
+    });
   } catch (err: any) {
     console.error("❌ ERROR:", err);
     return NextResponse.json(

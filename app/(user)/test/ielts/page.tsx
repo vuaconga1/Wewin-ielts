@@ -14,6 +14,8 @@ import { useNotification } from "@/app/utils/useNotification";
 import { useSession } from "next-auth/react";
 import { apiCall } from "@/app/utils/apiClient";
 import Timer from "@/app/components/timer";
+import { clearIeltsTestProgress } from "@/app/utils/ieltsStorage";
+import { getIeltsSheetId } from "@/app/lib/googleSheetsConfig";
 
 // 🔥 TIMER TÁCH RIÊNG
 
@@ -84,7 +86,7 @@ export default function IELTSPage() {
     }
 
     const accessToken = clientSession?.accessToken as string;
-    const sheetId = "1Jh_KKBMmUzE7cltx6ZdGeeJIvm2q6PbDlgn_INKNQAY";
+    const sheetId = getIeltsSheetId();
 
     try {
       // 1️⃣ Kiểm tra đã thi chưa
@@ -102,7 +104,9 @@ export default function IELTSPage() {
       //   return;
       // }
 
-      // 2️⃣ Lưu thời gian bắt đầu
+      // 2️⃣ Xóa dữ liệu bài thi cũ (tránh hiện "Completed" từ lần trước)
+      await clearIeltsTestProgress();
+
       const date = formatTimestamp();
 
       localStorage.setItem("ielts_startTime", date);

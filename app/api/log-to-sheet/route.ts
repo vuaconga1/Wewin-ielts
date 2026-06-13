@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { signOut } from "next-auth/react";
+import { SHEET_TABS } from "@/app/lib/googleSheetsConfig";
 
 interface IeltsLogData {
   name?: string;
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
 
     // Nếu có uuid -> update hàng
     if (uuid) {
-      const findUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/'Speaking_list'!A:K?majorDimension=ROWS`;
+      const findUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/'${SHEET_TABS.SPEAKING}'!A:K?majorDimension=ROWS`;
       const findRes = await fetch(findUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
       const rowIndex = rows.findIndex((r: string[]) => r[1] === uuid);
 
       if (rowIndex !== -1) {
-        const range = `'Speaking_list'!A${rowIndex + 1}:K${rowIndex + 1}`;
+        const range = `'${SHEET_TABS.SPEAKING}'!A${rowIndex + 1}:K${rowIndex + 1}`;
         const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
 
         const buildRow = (d: IeltsLogData): string[] => [
@@ -71,7 +71,7 @@ export async function POST(req: Request) {
 
     // Nếu chưa có uuid -> append hàng mới
     const newUUID = uuid || randomUUID();
-    const sheetUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/'Speaking_list'!A2:append?valueInputOption=USER_ENTERED`;
+    const sheetUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/'${SHEET_TABS.SPEAKING}'!A2:append?valueInputOption=USER_ENTERED`;
 
     const buildRow = (d: IeltsLogData): string[] => [
       timestamp,
@@ -87,7 +87,7 @@ export async function POST(req: Request) {
       d.linkPdf || "",
     ];
 
-    await fetch(sheetUrl, {
+    const appendRes = await fetch(sheetUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -95,6 +95,11 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({ values: [buildRow(data)] }),
     });
+
+    if (!appendRes.ok) {
+      const text = await appendRes.text();
+      throw new Error(text || "Failed to append Speaking_list");
+    }
 
     return NextResponse.json({ success: true, uuid: newUUID, created: true });
   } catch (error: any) {

@@ -1,4 +1,6 @@
-// app/lib/googleSheets.ts
+// app/components/googleSheets.tsx
+
+import { SHEET_TABS } from "@/app/lib/googleSheetsConfig";
 
 // =====================
 // TYPES
@@ -71,7 +73,7 @@ export interface AnswerKey {
 export async function appendFinalList(params: AppendFinalListParams) {
   const { accessToken, sheetId, id, name, email, score, pdfUrl } = params;
 
-  const range = `Final_list!A:E`;
+  const range = `${SHEET_TABS.FINAL}!A:E`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
 
   // Include PDF URL if provided
@@ -162,7 +164,7 @@ export async function appendIELTSList(params: AppendIELTSListParams) {
     skillStats ? JSON.stringify(skillStats) : "",
   ];
 
-  const range = `Listening_list!A:BF`; // Extended to AZ to accommodate new fields
+  const range = `${SHEET_TABS.LISTENING}!A:BF`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
 
   const body = { values: [row] };
@@ -192,9 +194,9 @@ export async function appendIELTSList(params: AppendIELTSListParams) {
 export async function fetchAnswersFromSheet(
   accessToken: string,
   sheetId: string,
-  sheetName = "Answers"
+  sheetName = SHEET_TABS.ANSWERS
 ): Promise<AnswerRow[]> {
-  const range = `${sheetName}!A2:D`; // Question, Answer, Skill, Point
+  const range = `${sheetName}!A2:D`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`;
 
   const res = await fetch(url, {

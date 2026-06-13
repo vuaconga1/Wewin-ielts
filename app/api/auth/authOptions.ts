@@ -4,6 +4,11 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { JWT } from "next-auth/jwt";
 import { verifyCredentialUser } from "@/app/lib/users";
 import { allowedEmails } from "@/app/constants/email";
+import {
+  getGoogleClientId,
+  getGoogleClientSecret,
+  isGoogleAuthConfigured,
+} from "@/app/lib/googleAuth";
 
 /** ---- TYPES FIX ---- */
 interface GoogleAccount {
@@ -65,24 +70,28 @@ export const authOptions: NextAuthOptions = {
         };
       },
     }),
-    GoogleProvider({
-      clientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET!,
-      authorization: {
-        params: {
-          scope: [
-            "openid",
-            "email",
-            "profile",
-            "https://www.googleapis.com/auth/drive.file",
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/gmail.send",
-          ].join(" "),
-          access_type: "offline",
-          prompt: "consent",
-        },
-      },
-    }),
+    ...(isGoogleAuthConfigured()
+      ? [
+          GoogleProvider({
+            clientId: getGoogleClientId()!,
+            clientSecret: getGoogleClientSecret()!,
+            authorization: {
+              params: {
+                scope: [
+                  "openid",
+                  "email",
+                  "profile",
+                  "https://www.googleapis.com/auth/drive.file",
+                  "https://www.googleapis.com/auth/spreadsheets",
+                  "https://www.googleapis.com/auth/gmail.send",
+                ].join(" "),
+                access_type: "offline",
+                prompt: "consent",
+              },
+            },
+          }),
+        ]
+      : []),
   ],
 
   callbacks: {
@@ -91,14 +100,17 @@ export const authOptions: NextAuthOptions = {
       const acc = account as GoogleAccount | null;
       const pf = profile as GoogleProfile | null;
 
-      // Credentials login
-      if (user) {
+      // Credentials login (OAuth providers also pass `user`, but always have `account`)
+      if (user && !acc) {
         token.userId = user.id;
         token.sub = user.id;
         token.email = user.email ?? undefined;
         token.name = user.name ?? undefined;
         token.role = (user as { role?: "admin" | "user" }).role ?? "user";
         token.provider = "credentials";
+        token.accessToken = undefined;
+        token.refreshToken = undefined;
+        token.expiresAt = undefined;
         return token;
       }
 
@@ -110,12 +122,18 @@ export const authOptions: NextAuthOptions = {
         token.provider = "google";
       }
 
-      // Sync user
+      // Sync user (Google)
       if (acc && pf) {
-        try {
-          const res = await fetch(
-            `${process.env.NEXT_PUBLIC_API_URL}/auth/google-login`,
-            {
+        token.email = pf.email ?? token.email;
+        token.name = pf.name ?? token.name;
+        token.picture = pf.picture ?? token.picture;
+        token.userId = pf.email ?? token.userId;
+        token.role = resolveRole(pf.email);
+
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+        if (apiUrl) {
+          try {
+            const res = await fetch(`${apiUrl}/auth/google-login`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -123,17 +141,16 @@ export const authOptions: NextAuthOptions = {
                 name: pf.name,
                 image: pf.picture,
               }),
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              token.userId = data.id || pf.email;
             }
-          );
-
-          const data = await res.json();
-          token.userId = data.id || pf.email;
-        } catch (err) {
-          console.error("User sync error:", err);
-          token.userId = pf.email;
+          } catch (err) {
+            console.error("User sync error:", err);
+          }
         }
-
-        token.role = resolveRole(pf.email);
       }
 
       // Credentials session — no Google token refresh
@@ -161,6 +178,7 @@ export const authOptions: NextAuthOptions = {
         session.user.id = (token.userId as string) ?? undefined;
         session.user.email = (token.email as string) ?? session.user.email;
         session.user.name = (token.name as string) ?? session.user.name;
+        session.user.image = (token.picture as string) ?? session.user.image;
         session.user.role = (token.role as "admin" | "user") ?? "user";
       }
 
@@ -185,8 +203,8 @@ async function refreshAccessToken(token: JWT) {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
-        client_secret: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET!,
+        client_id: getGoogleClientId()!,
+        client_secret: getGoogleClientSecret()!,
         grant_type: "refresh_token",
         refresh_token: token.refreshToken as string,
       }),

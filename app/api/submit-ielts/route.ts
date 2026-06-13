@@ -280,35 +280,43 @@ export async function POST(req: Request) {
     // ---------------------------------------------------
     // 7. APPEND GRAMMAR LIST WITH DETAILED SCORES
     // ---------------------------------------------------
+    const warnings: string[] = [];
+
     console.log("📝 Saving results to Listening_list...");
-    await appendIELTSList({
-      accessToken,
-      sheetId,
-      id,
-      fullName,
-      birthDate,
-      location,
-      phone,
-      email,
-      consultant,
-      ieltsNeed,
-      selfScore,
-      studyTime,
-      startTime,
-      finishTime,
-      listening,
-      writingAnswer,
-      reading: readingArr,
-      // ⭐ NEW: Detailed scores
-      // totalScore: gradingResult.totalScore,
-      // maxScore: gradingResult.maxScore,
-      // correctCount: gradingResult.correctCount,
-      // totalQuestions: gradingResult.totalQuestions,
-      // grammarReadingBand,
-      // writingBand,
-      // overallBand,
-      // skillStats: gradingResult.skillStats,
-    });
+    try {
+      await appendIELTSList({
+        accessToken,
+        sheetId,
+        id,
+        fullName,
+        birthDate,
+        location,
+        phone,
+        email,
+        consultant,
+        ieltsNeed,
+        selfScore,
+        studyTime,
+        startTime,
+        finishTime,
+        listening,
+        writingAnswer,
+        reading: readingArr,
+      });
+    } catch (sheetError: any) {
+      const message = sheetError?.message || "Không ghi được Listening_list";
+      console.error("⚠️ Listening_list update failed:", message);
+      warnings.push(
+        "Không ghi được Google Sheet (Listening_list). Kiểm tra quyền Editor trên sheet hoặc dùng sheet của bạn trong GOOGLE_SHEETS_ID."
+      );
+    }
+
+    if (
+      writingScore.suggestions?.toLowerCase().includes("api key") ||
+      writingScore.taskAchievement?.toLowerCase().includes("error evaluating")
+    ) {
+      warnings.push("OpenAI API key không hợp lệ — bỏ qua chấm Writing.");
+    }
 
     // ---------------------------------------------------
     // 8. SEND EMAIL WITH PROFESSIONAL TEMPLATE
@@ -398,7 +406,8 @@ export async function POST(req: Request) {
       writingBand,
       overallBand,
       numerologyHTML,
-      timestamp: finishTime, // ⭐ FIX
+      timestamp: finishTime,
+      warnings,
     });
   } catch (error: any) {
     console.error("🔥 API ERROR:", error);

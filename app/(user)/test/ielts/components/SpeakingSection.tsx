@@ -9,13 +9,14 @@ import Notification from "@/app/components/notification";
 import ConfirmPopup from "@/app/components/confirmPopup";
 import localforage from "localforage";
 import { getSupportedMimeType } from "@/app/utils/audio";
+import { getFallbackSpeakingQuestions } from "@/app/constants/speaking";
+import {
+  bindAudioToCurrentSession,
+  isAudioSessionValid,
+} from "@/app/utils/ieltsStorage";
+import { getIeltsSheetId } from "@/app/lib/googleSheetsConfig";
+import { getSpeakingUploadFolderId } from "@/app/lib/googleDriveConfig";
 
-declare global {
-  interface Window {
-    Recorder: any;
-    webkitAudioContext?: typeof AudioContext;
-  }
-}
 
 interface IELTSQuestionSet {
   part1: string[];
@@ -72,8 +73,8 @@ export default function SpeakingSection({
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadedRef = useRef(false);
 
-  const DRIVE_FOLDER_ID = "1yJm4BCyEEF-kAEUFYGPFCrwIV8huTZw7";
-  const SHEET_ID = "1wt6tZMFyhbe5-jk-rU4oGaNCCnoIp9ZICi-DsXE4aJA";
+  const DRIVE_FOLDER_ID = getSpeakingUploadFolderId();
+  const SHEET_ID = getIeltsSheetId();
 
   const chunksRef = useRef<BlobPart[]>([]);
 
@@ -94,19 +95,27 @@ export default function SpeakingSection({
       try {
         const savedQuestions = localStorage.getItem("ielts_questions");
         if (savedQuestions) {
-          setQuestions(JSON.parse(savedQuestions));
-          setLoadingQuestions(false);
-          return;
+          const parsed = JSON.parse(savedQuestions) as IELTSQuestionSet;
+          if (parsed?.part1?.length) {
+            setQuestions(parsed);
+            setLoadingQuestions(false);
+            return;
+          }
+          localStorage.removeItem("ielts_questions");
         }
 
         const res = await fetch("/api/generate-ielts");
-        if (!res.ok) throw new Error("Failed to load questions");
-        const data: IELTSQuestionSet = await res.json();
+        const data: IELTSQuestionSet = res.ok
+          ? await res.json()
+          : getFallbackSpeakingQuestions();
 
         setQuestions(data);
         localStorage.setItem("ielts_questions", JSON.stringify(data));
       } catch (err) {
         console.error("❌ Error loading questions:", err);
+        const fallback = getFallbackSpeakingQuestions();
+        setQuestions(fallback);
+        localStorage.setItem("ielts_questions", JSON.stringify(fallback));
       } finally {
         setLoadingQuestions(false);
       }
@@ -115,31 +124,31 @@ export default function SpeakingSection({
     loadQuestions();
   }, []);
 
-  // Load lại audio đã ghi (dạng base64, không request network)
+  // Load lại audio đã ghi — chỉ khi thuộc phiên thi hiện tại
   useEffect(() => {
+    if (!isAudioSessionValid()) {
+      localStorage.removeItem("ielts_audio_base64");
+      localStorage.removeItem("ielts_audio_links");
+      return;
+    }
+
     const saved = localStorage.getItem("ielts_audio_base64");
     if (!saved) return;
 
     try {
       const data: Record<number, string> = JSON.parse(saved);
+      const parts = Object.keys(data)
+        .map((p) => Number(p))
+        .filter((p) => Boolean(data[p]));
+
+      if (parts.length === 0) return;
+
       setAudioSrc(data);
-      const parts = Object.keys(data).map((p) => Number(p));
       setRecordedParts(parts);
     } catch (err) {
       console.error("❌ Error parsing saved audio:", err);
+      localStorage.removeItem("ielts_audio_base64");
     }
-  }, []);
-
-  // Load Recorder.js 1 lần
-  useEffect(() => {
-    const script = document.createElement("script");
-    script.src =
-      "https://cdn.jsdelivr.net/gh/mattdiamond/Recorderjs@master/dist/recorder.js";
-    script.async = true;
-    document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
-    };
   }, []);
 
   /* --------------------------- Recording logic -------------------------- */
@@ -158,8 +167,10 @@ export default function SpeakingSection({
     }
 
     if (!accessToken) {
-      notify("❌ Thiếu quyền Google! Vui lòng đăng nhập lại!", "error");
-      return;
+      notify(
+        "⚠️ Ghi âm cục bộ. Đăng nhập Google để upload lên Drive.",
+        "info"
+      );
     }
 
     try {
@@ -191,6 +202,7 @@ export default function SpeakingSection({
         setAudioSrc((prev) => {
           const updated = { ...prev, [part]: base64 };
           localStorage.setItem("ielts_audio_base64", JSON.stringify(updated));
+          bindAudioToCurrentSession();
           return updated;
         });
 
@@ -250,6 +262,7 @@ export default function SpeakingSection({
       setAudioSrc((prev) => {
         const updated = { ...prev, [part]: base64 };
         localStorage.setItem("ielts_audio_base64", JSON.stringify(updated));
+        bindAudioToCurrentSession();
         return updated;
       });
 
@@ -272,6 +285,8 @@ export default function SpeakingSection({
   };
 
   const handleUploadAndLog = async (blob: Blob, part: number) => {
+    if (!accessToken) return;
+
     try {
       setUploading((prev) => ({ ...prev, [part]: true }));
 
@@ -334,8 +349,22 @@ export default function SpeakingSection({
       const arr = JSON.parse(localStorage.getItem("ielts_audio_links") || "[]");
       arr.push({ part, link: fileLink });
       localStorage.setItem("ielts_audio_links", JSON.stringify(arr));
-    } catch (err) {
+    } catch (err: any) {
       console.error("❌ Upload or log error:", err);
+      const message = String(err?.message || err);
+      if (message.includes("Drive API")) {
+        notify(
+          "❌ Chưa bật Google Drive API. Vào Google Cloud Console → APIs → bật Google Drive API.",
+          "error"
+        );
+      } else if (message.includes("Insufficient permissions")) {
+        notify(
+          "❌ Tài khoản Google chưa có quyền ghi vào folder Speaking. Hãy share folder với email đăng nhập (quyền Editor).",
+          "error"
+        );
+      } else {
+        notify("❌ Upload audio thất bại. Ghi âm đã lưu cục bộ.", "error");
+      }
     } finally {
       setUploading((prev) => ({ ...prev, [part]: false }));
     }
@@ -348,7 +377,10 @@ export default function SpeakingSection({
 
   const handleFinishTest = async () => {
     if (!accessToken) {
-      alert("❌ Missing Google access token!");
+      notify(
+        "❌ Thiếu quyền Google. Đăng xuất và đăng nhập lại bằng Google.",
+        "error"
+      );
       return;
     }
 
@@ -412,79 +444,42 @@ export default function SpeakingSection({
         }),
       });
 
+      const rawText = await submitRes.text();
       let submitJson;
       try {
-        submitJson = await submitRes.json();
+        submitJson = JSON.parse(rawText);
       } catch (err) {
         console.error("❌ JSON parse failed:", err);
-        const text = await submitRes.text();
-        console.error("Raw:", text);
-        alert("Server trả về dữ liệu lỗi. Xem console.");
+        console.error("Raw:", rawText);
+        notify("Server trả về dữ liệu lỗi. Vui lòng thử lại.", "error");
         return;
       }
 
-      if (!submitJson.success) {
-        alert("❌ Lỗi khi submit bài thi!");
-        console.error(submitJson);
+      if (!submitRes.ok || !submitJson.success) {
+        const serverError =
+          submitJson?.error ||
+          (rawText.includes("OPENAI_API_KEY")
+            ? "Chưa cấu hình OPENAI_API_KEY trong .env.local"
+            : "Lỗi server khi nộp bài");
+        notify(`❌ ${serverError}`, "error");
+        console.error(submitJson || rawText);
         return;
       }
 
-      // ===============================
-      // 3. SUBMIT SPEAKING PDF REPORT
-      // ===============================
-
-      try {
-        const speakingLinks = JSON.parse(
-          localStorage.getItem("ielts_audio_links") || "[]"
-        );
-
-        // ❗ CHỜ upload xong
-        if (Object.values(uploading).some((v) => v === true)) {
-          notify("⏳ Đang upload audio... vui lòng chờ 2–3 giây!", "error");
-          return;
-        }
-
-        const res = await fetch("/api/speaking-report", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accessToken,
-            sheetId: SHEET_ID,
-            uuid,
-            student: {
-              name: userInfo.fullName,
-              email: userInfo.email,
-              birthDate: userInfo.birthDate,
-            },
-            questions: {
-              part1: questions!.part1.join("\n"),
-              part2:
-                questions!.part2.topic +
-                "\n" +
-                questions!.part2.bullets.map((b) => "- " + b).join("\n") +
-                `\nFollow-up: ${questions!.part2.followUp}`,
-              part3:
-                questions!.part3.reading +
-                "\n" +
-                questions!.part3.questions.map((q) => "- " + q).join("\n"),
-            },
-            audios: speakingLinks,
-            report: submitJson,
-          }),
-        });
-
-        const speakingJson = await res.json();
-
-        if (!speakingJson.success) {
-          console.error("❌ Speaking report failed:", speakingJson);
-        } else {
-          console.log("📄 SPEAKING PDF CREATED:", speakingJson.pdfLink);
-        }
-      } catch (err) {
-        console.error("🔥 Speaking-report error:", err);
+      // Speaking được chấm thủ công: admin bấm nút Evaluate trên Google Sheet
+      if (Object.values(uploading).some((v) => v === true)) {
+        notify("⏳ Đang upload audio... vui lòng chờ 2–3 giây!", "error");
+        return;
       }
 
-      notify("🎉 Hoàn tất bài thi!", "success");
+      if (Array.isArray(submitJson.warnings) && submitJson.warnings.length > 0) {
+        notify(`⚠️ ${submitJson.warnings.join(" ")}`, "info");
+      }
+
+      notify(
+        "🎉 Hoàn tất bài thi! Bài Speaking sẽ được chấm khi admin bấm Evaluate trên Google Sheet.",
+        "success"
+      );
       localStorage.setItem("ielts_finished", "true");
       onFinish?.();
     } catch (error) {
@@ -504,8 +499,8 @@ export default function SpeakingSection({
     const isDisabled =
       isRecorded ||
       isUploading ||
-      !accessToken ||
       loadingQuestions ||
+      !questions ||
       isFinished;
 
     return (
@@ -611,6 +606,13 @@ export default function SpeakingSection({
       <h1 className="text-4xl font-bold text-[#0E4BA9] mb-3">
         🎙️ IELTS Speaking Test
       </h1>
+
+      {!accessToken && (
+        <p className="max-w-3xl mx-auto mb-6 text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm">
+          Bạn đang đăng nhập bằng email/mật khẩu — có thể ghi âm cục bộ. Để upload
+          và nộp bài đầy đủ, hãy đăng nhập bằng Google.
+        </p>
+      )}
 
       {/* Part 1 */}
       <section className="max-w-3xl mx-auto bg-white rounded-3xl shadow-lg p-8 mb-12 mt-8 border-l-8 border-[#0E4BA9]">

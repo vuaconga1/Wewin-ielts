@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WeWIN IELTS
 
-## Getting Started
+Next.js app for IELTS practice tests (Listening, Reading, Writing, Speaking). Speaking audio is uploaded to Google Drive and logged to Google Sheets; admin evaluates via Google Apps Script (`AIEvaluate.txt`).
 
-First, run the development server:
+## Requirements
+
+- Node.js 18+
+- pnpm (recommended) or npm
+- Google Cloud project with OAuth 2.0 credentials
+- Google Drive API & Google Sheets API enabled
+- OpenAI API key (Writing auto-grade; Speaking via Apps Script on Sheet)
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.example .env.local
+# Edit .env.local with your credentials
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+See [`.env.example`](.env.example). **Do not commit `.env.local`.**
 
-## Learn More
+| Variable | Description |
+|----------|-------------|
+| `NEXTAUTH_URL` | App URL (e.g. `http://localhost:3000`) |
+| `NEXTAUTH_SECRET` | Random string for session encryption |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials |
+| `GOOGLE_SHEETS_ID` | Spreadsheet ID for test management |
+| `GOOGLE_DRIVE_SPEAKING_FOLDER_ID` | Drive folder for speaking audio |
+| `OPENAI_API_KEY` | OpenAI key for Writing evaluation |
 
-To learn more about Next.js, take a look at the following resources:
+## Google Apps Script (Speaking Evaluate)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Copy code from `AIEvaluate.txt` into **Extensions → Apps Script** on the Google Sheet. Configure:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `OPENAI_API_KEY` — in sheet **Config → B1** (recommended) or Script Properties
+- `ADMIN_EMAILS` — admin email(s) to receive PDF reports
+- `PDF_DRIVE_FOLDER_ID` — Drive folder ID for generated PDFs
 
-## Deploy on Vercel
+Assign button **Evaluate** to function `generateIELTSReports`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Scripts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+pnpm dev      # development
+pnpm build    # production build
+pnpm start    # run production server
+pnpm lint     # ESLint
+```
